@@ -31,6 +31,10 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
     steps:
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
@@ -62,7 +66,16 @@ jobs:
           fi
 
       - name: Run Bandit SAST
-        run: bandit -r ${{ inputs.bandit-target }} -c ${{ inputs.bandit-config }} --severity-level medium --confidence-level medium
+        run: |
+          BANDIT_ARGS="-r ${{ inputs.bandit-target }} --severity-level medium --confidence-level medium"
+          if [ -n "${{ inputs.bandit-config }}" ]; then
+            if [ -f "${{ inputs.bandit-config }}" ]; then
+              BANDIT_ARGS="$BANDIT_ARGS -c ${{ inputs.bandit-config }}"
+            else
+              echo "::warning::bandit config file '${{ inputs.bandit-config }}' not found, running without config"
+            fi
+          fi
+          bandit $BANDIT_ARGS
 
       - name: Run Semgrep
         if: inputs.semgrep-rules != ''
