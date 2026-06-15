@@ -1,0 +1,131 @@
+name: Docker Build Verify & Push
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: GCP project ID
+      artifact-repository:
+        required: true
+        type: string
+        description: Artifact Registry repository name
+      image-name:
+        required: true
+        type: string
+        description: Image name inside Artifact Registry
+      dockerfile:
+        required: true
+        type: string
+        description: Path to the Dockerfile
+      context:
+        required: false
+        type: string
+        default: '.'
+        description: Docker build context
+      build-args:
+        required: false
+        type: string
+        default: ''
+        description: Comma-separated Docker build args (KEY=VALUE,KEY2=VALUE2)
+      verify-script:
+        required: false
+        type: string
+        default: ''
+        description: Optional repo-local script to verify the built image before push
+      region:
+        required: false
+        type: string
+        default: europe-west2
+      trivy-severity:
+        required: false
+        type: string
+        default: CRITICAL,HIGH
+    secrets:
+      WIF_PROVIDER:
+        required: true
+      WIF_SA:
+        required: true
+    outputs:
+      image:
+        description: Full image reference with the commit SHA tag
+        value: ${{ jobs.build-verify-push.outputs.image }}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-verify-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    outputs:
+      image: ${{ steps.image-path.outputs.image }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+
+      - name: Set up Docker auth
+        run: gcloud auth configure-docker ${{ inputs.region }}-docker.pkg.dev --quiet
+
+      - name: Compute image path
+        id: image-path
+        run: |
+          IMAGE_PATH="${{ inputs.region }}-docker.pkg.dev/${{ inputs.project }}/${{ inputs.artifact-repository }}/${{ inputs.image-name }}"
+          echo "IMAGE_PATH=$IMAGE_PATH" >> "$GITHUB_ENV"
+          echo "image=$IMAGE_PATH:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        run: |
+          BUILD_ARGS=""
+          if [ -n "${{ inputs.build-args }}" ]; then
+            for arg in $(printf '%s' '${{ inputs.build-args }}' | tr ',' ' '); do
+              BUILD_ARGS="$BUILD_ARGS --build-arg $arg"
+            done
+          fi
+
+          docker build \
+            -t "$IMAGE_PATH:${{ github.sha }}" \
+            -t "$IMAGE_PATH:latest" \
+            -f "${{ inputs.dockerfile }}" \
+            $BUILD_ARGS \
+            "${{ inputs.context }}"
+
+      - name: Run Trivy vulnerability scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@bfa4b33a029b9aa80ddb784b45574c30e072c59e
+        with:
+          image-ref: ${{ env.IMAGE_PATH }}:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: ${{ inputs.trivy-severity }}
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          image: ${{ env.IMAGE_PATH }}:${{ github.sha }}
+          format: spdx-json
+          artifact-name: sbom-${{ inputs.image-name }}-${{ github.sha }}.spdx.json
+
+      - name: Run image verification
+        if: inputs.verify-script != ''
+        env:
+          IMAGE_REF: ${{ steps.image-path.outputs.image }}
+        run: bash "${{ inputs.verify-script }}"
+
+      - name: Push to Artifact Registry
+        run: docker push "$IMAGE_PATH" --all-tags

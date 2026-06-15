@@ -6,9 +6,11 @@ Reusable GitHub Actions workflows and shared security configurations for Native 
 
 | Workflow | Purpose |
 |---|---|
-| `security-audit.yml` | TruffleHog + Bandit + Semgrep + image scanning + SBOMs |
-| `docker-build-push.yml` | WIF auth + Docker build + push to Artifact Registry |
-| `deploy-cloud-run.yml` | WIF auth + Cloud Run deploy |
+| `security-audit.yml` | TruffleHog, Bandit, and optional Semgrep for source-level security checks |
+| `docker-build-push.yml` | Shared build, Trivy scan, SBOM, and push flow for straightforward image builds |
+| `docker-build-verify-push.yml` | Shared build, Trivy scan, SBOM, optional caller-provided verification, then push |
+| `deploy-cloud-run.yml` | Thin wrapper for `gcloud run deploy` when a repo wants a single-service deploy workflow |
+| `cloud-run-image-rollout.yml` | Image-only rollout for existing Cloud Run services and jobs |
 | `scheduled-cve-check.yml` | Pull latest images, Trivy scan, Slack notification |
 
 ## Shared Configurations
@@ -30,7 +32,7 @@ jobs:
     with:
       python-version: '3.12'
       bandit-target: src/
-      images: '[{"dockerfile":"Dockerfile.prod","name":"my-service"}]'
+      semgrep-rules: .semgrep/
     secrets: inherit
 ```
 
@@ -43,7 +45,49 @@ jobs:
     uses: NativeInsurance/native-shared-workflows/.github/workflows/docker-build-push.yml@main
     with:
       project: my-gcp-project
+      artifact-repository: my-artifact-repo
       images: '[{"dockerfile":"Dockerfile.prod","name":"my-service","build_args":"KEY=VAL"}]'
+    secrets:
+      WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+      WIF_SA: ${{ secrets.WIF_SA }}
+```
+
+### docker-build-verify-push
+
+```yaml
+jobs:
+  build-api:
+    uses: NativeInsurance/native-shared-workflows/.github/workflows/docker-build-verify-push.yml@main
+    with:
+      project: my-gcp-project
+      artifact-repository: my-artifact-repo
+      image-name: my-api
+      dockerfile: apps/api/Dockerfile
+      context: apps/api
+      verify-script: scripts/ci-verify-api-image.sh
+    secrets:
+      WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+      WIF_SA: ${{ secrets.WIF_SA }}
+```
+
+### cloud-run-image-rollout
+
+```yaml
+jobs:
+  rollout:
+    needs: [build-api, build-web]
+    uses: NativeInsurance/native-shared-workflows/.github/workflows/cloud-run-image-rollout.yml@main
+    with:
+      project: my-gcp-project
+      jobs: |
+        [
+          {"name":"migrate","image":"${{ needs.build-api.outputs.image }}","execute":true,"wait":true}
+        ]
+      services: |
+        [
+          {"name":"api","image":"${{ needs.build-api.outputs.image }}"},
+          {"name":"web","image":"${{ needs.build-web.outputs.image }}"}
+        ]
     secrets:
       WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
       WIF_SA: ${{ secrets.WIF_SA }}
@@ -93,8 +137,8 @@ jobs:
 
 Reference workflows by git ref:
 
-- `@main` — latest stable
-- `@v1` — major version tag (to be created)
+- `@main` - latest stable
+- `@v1` - major version tag (to be created)
 
 ## Contributing
 

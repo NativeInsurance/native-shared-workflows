@@ -1,0 +1,116 @@
+name: Cloud Run Image Rollout
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: GCP project ID
+      region:
+        required: false
+        type: string
+        default: europe-west2
+      jobs:
+        required: false
+        type: string
+        default: '[]'
+        description: 'JSON array: [{"name":"job","image":"...","execute":true,"wait":true}]'
+      services:
+        required: false
+        type: string
+        default: '[]'
+        description: 'JSON array: [{"name":"service","image":"..."}]'
+    secrets:
+      WIF_PROVIDER:
+        required: true
+      WIF_SA:
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  rollout-jobs:
+    if: ${{ inputs.jobs != '' && inputs.jobs != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+
+      - name: Update Cloud Run jobs
+        env:
+          JOBS: ${{ inputs.jobs }}
+        run: |
+          echo "$JOBS" | jq -c '.[]' | while read -r job; do
+            name=$(echo "$job" | jq -r '.name')
+            image=$(echo "$job" | jq -r '.image')
+
+            gcloud run jobs update "$name" \
+              --image "$image" \
+              --region "${{ inputs.region }}" \
+              --project "${{ inputs.project }}"
+          done
+
+      - name: Execute Cloud Run jobs
+        env:
+          JOBS: ${{ inputs.jobs }}
+        run: |
+          echo "$JOBS" | jq -c '.[] | select(.execute == true)' | while read -r job; do
+            name=$(echo "$job" | jq -r '.name')
+            wait=$(echo "$job" | jq -r '.wait // false')
+
+            if [ "$wait" = "true" ]; then
+              gcloud run jobs execute "$name" \
+                --region "${{ inputs.region }}" \
+                --project "${{ inputs.project }}" \
+                --wait
+            else
+              gcloud run jobs execute "$name" \
+                --region "${{ inputs.region }}" \
+                --project "${{ inputs.project }}"
+            fi
+          done
+
+  rollout-services:
+    if: ${{ !cancelled() && inputs.services != '' && inputs.services != '[]' && (needs.rollout-jobs.result == 'success' || needs.rollout-jobs.result == 'skipped') }}
+    needs: rollout-jobs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+
+      - name: Update Cloud Run services
+        env:
+          SERVICES: ${{ inputs.services }}
+        run: |
+          echo "$SERVICES" | jq -c '.[]' | while read -r service; do
+            name=$(echo "$service" | jq -r '.name')
+            image=$(echo "$service" | jq -r '.image')
+
+            gcloud run services update "$name" \
+              --image "$image" \
+              --region "${{ inputs.region }}" \
+              --project "${{ inputs.project }}"
+          done
