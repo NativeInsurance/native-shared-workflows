@@ -53,6 +53,8 @@ jobs:
           IMAGE_PATH="${{ inputs.region }}-docker.pkg.dev/${{ inputs.project }}/${{ github.event.repository.name }}/${{ matrix.image.name }}"
           echo "IMAGE_PATH=$IMAGE_PATH" >> $GITHUB_ENV
 
+          CONTEXT="${{ matrix.image.context || '.' }}"
+
           BUILD_ARGS=""
           if [ -n "${{ matrix.image.build_args }}" ]; then
             for arg in $(echo '${{ matrix.image.build_args }}' | tr ',' ' '); do
@@ -60,7 +62,7 @@ jobs:
             done
           fi
 
-          docker build -t "$IMAGE_PATH:${{ github.sha }}" -t "$IMAGE_PATH:latest" -f ${{ matrix.image.dockerfile }} $BUILD_ARGS .
+          docker build -t "$IMAGE_PATH:${{ github.sha }}" -t "$IMAGE_PATH:latest" -f ${{ matrix.image.dockerfile }} $BUILD_ARGS "$CONTEXT"
 
       - name: Run Trivy vulnerability scan
         continue-on-error: true
