@@ -1,0 +1,11 @@
+exclude_dirs:
+  - tests
+  - alembic
+  - .venv
+  - venv
+  - env
+  - node_modules
+
+skips:
+  - B101
+  - B311

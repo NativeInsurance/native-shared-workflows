@@ -1,0 +1,139 @@
+rules:
+  - id: jwt-none-algorithm
+    pattern: jwt.decode(..., algorithms=["none"], ...)
+    message: JWT token accepts the 'none' algorithm. Use a real signing algorithm.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: "CWE-347"
+      owasp: "A02:2021"
+
+  - id: jwt-decode-without-verification
+    patterns:
+      - pattern: jwt.decode($TOKEN, ..., options={"verify_signature": False})
+      - pattern-not: jwt.decode($TOKEN, ..., options={"verify_signature": False, "verify_exp": ...})
+    message: JWT decode called with verify_signature=False. Tokens must be verified.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: "CWE-347"
+      owasp: "A02:2021"
+
+  - id: jwt-hardcoded-secret
+    patterns:
+      - pattern-either:
+          - pattern: jwt.encode(..., $SECRET, ...)
+          - pattern: jwt.decode(..., $SECRET, ...)
+      - metavariable-regex:
+          metavariable: $SECRET
+          regex: '^\"[^\"]+\"$|^\'[^\']+\'$'
+    message: JWT secret appears to be hardcoded. Use an environment variable or secret manager.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: "CWE-798"
+      owasp: "A07:2021"
+
+  - id: sql-fstring-concatenation
+    pattern-either:
+      - pattern: execute(f"...{$VAR}...")
+      - pattern: execute(f"...".format(...))
+    message: SQL query built with f-string or format. Use parameterized queries.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: "CWE-89"
+      owasp: "A03:2021"
+
+  - id: shell-injection
+    pattern-either:
+      - pattern: os.system($CMD)
+      - pattern: subprocess.call($CMD, shell=True)
+    message: Shell command built with untrusted input. Use subprocess with shell=False and an argument list.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: "CWE-78"
+      owasp: "A03:2021"
+
+  - id: unsafe-deserialization
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: yaml.load(...)
+    message: Unsafe deserialization call. Use yaml.safe_load or avoid pickle.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: "CWE-502"
+      owasp: "A08:2021"
+
+  - id: requests-without-timeout
+    patterns:
+      - pattern: requests.$METHOD(...)
+      - pattern-not: requests.$METHOD(..., timeout=$T, ...)
+    message: HTTP request without a timeout. Always set a timeout to avoid hanging.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      cwe: "CWE-400"
+
+  - id: debug-mode-in-production
+    patterns:
+      - pattern: DEBUG = True
+      - pattern-not-inside: |
+          if __name__ == "__main__":
+            ...
+    message: DEBUG=True found outside a __main__ guard. Ensure it is off in production.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: "CWE-489"
+
+  - id: cookie-missing-secure-flag
+    patterns:
+      - pattern: set_cookie(..., secure=False, ...)
+    message: Cookie set with secure=False. Use secure=True in production.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      cwe: "CWE-614"
+      owasp: "A05:2021"
+
+  - id: cookie-missing-httponly
+    patterns:
+      - pattern: set_cookie(..., httponly=False, ...)
+    message: Cookie set with httponly=False. Use httponly=True to prevent JS access.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      cwe: "CWE-1004"
+      owasp: "A05:2021"
+
+  - id: cors-wildcard-origins
+    pattern-either:
+      - pattern: CORSMiddleware(..., allow_origins=["*"], ...)
+      - pattern: CORS_ALLOW_ALL_ORIGINS = True
+    message: CORS configured with wildcard origins. Restrict to known origins.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: "CWE-942"
+      owasp: "A05:2021"
+
+  - id: open-redirect-user-input
+    pattern-either:
+      - pattern: RedirectResponse(url=$URL)
+    message: Redirect target may be user-controlled. Validate redirect URLs against an allowlist.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      cwe: "CWE-601"
+      owasp: "A01:2021"
+
+  - id: print-in-production
+    pattern: print(...)
+    message: print() call found. Use structured logging (logging module) in production code.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      cwe: "CWE-778"

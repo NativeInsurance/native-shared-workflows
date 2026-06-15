@@ -1,0 +1,53 @@
+name: Docker Build & Push
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+        description: 'GCP project ID'
+      region:
+        required: false
+        type: string
+        default: 'europe-west2'
+      images:
+        required: true
+        type: string
+        description: 'JSON array: [{"dockerfile":"Dockerfile","name":"image-name","build_args":"KEY=VAL"}, ...]'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: ${{ fromJson(inputs.images) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SA }}
+
+      - name: Set up Docker auth
+        run: gcloud auth configure-docker ${{ inputs.region }}-docker.pkg.dev
+
+      - name: Build and push
+        run: |
+          IMAGE_PATH="${{ inputs.region }}-docker.pkg.dev/${{ inputs.project }}/${{ github.event.repository.name }}/${{ matrix.image.name }}"
+          BUILD_ARGS=""
+          if [ -n "${{ matrix.image.build_args }}" ]; then
+            for arg in $(echo '${{ matrix.image.build_args }}' | tr ',' ' '); do
+              BUILD_ARGS="$BUILD_ARGS --build-arg $arg"
+            done
+          fi
+
+          docker build -t "$IMAGE_PATH:${{ github.sha }}" -t "$IMAGE_PATH:latest" -f ${{ matrix.image.dockerfile }} $BUILD_ARGS .
+          docker push "$IMAGE_PATH" --all-tags

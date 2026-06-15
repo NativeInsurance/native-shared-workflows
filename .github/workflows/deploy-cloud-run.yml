@@ -1,0 +1,53 @@
+name: Deploy Cloud Run
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+      region:
+        required: false
+        type: string
+        default: 'europe-west2'
+      service:
+        required: true
+        type: string
+      image:
+        required: true
+        type: string
+      ingress:
+        required: false
+        type: string
+        default: 'internal-and-cloud-load-balancing'
+    secrets:
+      WIF_PROVIDER:
+        required: true
+      WIF_SA:
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ inputs.service }} \
+            --image ${{ inputs.image }} \
+            --platform managed \
+            --region ${{ inputs.region }} \
+            --project ${{ inputs.project }} \
+            --ingress ${{ inputs.ingress }}
