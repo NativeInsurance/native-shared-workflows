@@ -14,7 +14,11 @@ on:
       images:
         required: true
         type: string
-        description: 'JSON array: [{"dockerfile":"Dockerfile","name":"image-name","build_args":"KEY=VAL"}, ...]'
+        description: 'JSON array: [{"dockerfile":"path/Dockerfile","name":"image-name","build_args":"KEY=VAL"}, ...]'
+      trivy-severity:
+        required: false
+        type: string
+        default: 'CRITICAL,HIGH'
 
 permissions:
   contents: read
@@ -37,11 +41,13 @@ jobs:
           service_account: ${{ secrets.WIF_SA }}
 
       - name: Set up Docker auth
-        run: gcloud auth configure-docker ${{ inputs.region }}-docker.pkg.dev
+        run: gcloud auth configure-docker ${{ inputs.region }}-docker.pkg.dev --quiet
 
-      - name: Build and push
+      - name: Build image
         run: |
           IMAGE_PATH="${{ inputs.region }}-docker.pkg.dev/${{ inputs.project }}/${{ github.event.repository.name }}/${{ matrix.image.name }}"
+          echo "IMAGE_PATH=$IMAGE_PATH" >> $GITHUB_ENV
+
           BUILD_ARGS=""
           if [ -n "${{ matrix.image.build_args }}" ]; then
             for arg in $(echo '${{ matrix.image.build_args }}' | tr ',' ' '); do
@@ -50,4 +56,23 @@ jobs:
           fi
 
           docker build -t "$IMAGE_PATH:${{ github.sha }}" -t "$IMAGE_PATH:latest" -f ${{ matrix.image.dockerfile }} $BUILD_ARGS .
-          docker push "$IMAGE_PATH" --all-tags
+
+      - name: Run Trivy vulnerability scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@bfa4b33a029b9aa80ddb784b45574c30e072c59e
+        with:
+          image-ref: ${{ env.IMAGE_PATH }}:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: ${{ inputs.trivy-severity }}
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          image: ${{ env.IMAGE_PATH }}:${{ github.sha }}
+          format: spdx-json
+          artifact-name: sbom-${{ matrix.image.name }}-${{ github.sha }}.spdx.json
+
+      - name: Push to Artifact Registry
+        run: docker push "$IMAGE_PATH" --all-tags

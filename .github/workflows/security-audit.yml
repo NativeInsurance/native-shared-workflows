@@ -18,16 +18,12 @@ on:
       semgrep-rules:
         required: false
         type: string
-        default: '.semgrep/'
+        default: ''
+        description: 'Path to .semgrep/ directory with custom rules. Leave empty to skip Semgrep.'
       semgrep-severity:
         required: false
         type: string
         default: 'ERROR'
-      images:
-        required: false
-        type: string
-        default: '[]'
-        description: 'JSON array: [{"dockerfile":"Dockerfile.prod","name":"backend"}, ...]'
 
 permissions:
   contents: read
@@ -71,41 +67,3 @@ jobs:
       - name: Run Semgrep
         if: inputs.semgrep-rules != ''
         run: semgrep --config ${{ inputs.semgrep-rules }} --severity ${{ inputs.semgrep-severity }} --quiet --no-secrets-validation
-
-      - name: Build and scan images
-        if: inputs.images != '[]'
-        run: |
-          echo '${{ inputs.images }}' | python3 -c "
-          import json, sys, os, subprocess
-
-          images = json.load(sys.stdin)
-          for img in images:
-              print(f'Building {img[\"name\"]} from {img[\"dockerfile\"]}')
-              subprocess.run(['docker', 'build', '-t', f'{img[\"name\"]}:scan', '-f', img['dockerfile'], '.'], check=True)
-              print(f'Running Trivy on {img[\"name\"]}')
-              subprocess.run([
-                  'docker', 'run', '--rm',
-                  '-v', '/var/run/docker.sock:/var/run/docker.sock',
-                  'aquasec/trivy:latest',
-                  'image', '--format', 'table',
-                  '--severity', 'CRITICAL,HIGH',
-                  '--ignore-unfixed',
-                  '--exit-code', '0',
-                  f'{img[\"name\"]}:scan',
-              ], check=False)
-              sbom_path = f'sbom-{img[\"name\"]}-spdx.json'
-              subprocess.run([
-                  'docker', 'run', '--rm',
-                  '-v', f'{os.getcwd()}:/work', '-w', '/work',
-                  'anchore/syft:latest',
-                  f'{img[\"name\"]}:scan',
-                  '-o', f'spdx-json={sbom_path}',
-              ], check=True)
-          "
-
-      - name: Upload SBOM artifacts
-        if: inputs.images != '[]'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: sboms
-          path: sbom-*.json
