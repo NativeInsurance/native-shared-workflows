@@ -7,6 +7,11 @@ on:
         required: true
         type: string
         description: 'GCP project ID'
+      artifact-repository:
+        required: false
+        type: string
+        default: ''
+        description: 'Artifact Registry repository name. Defaults to the calling repository name.'
       region:
         required: false
         type: string
@@ -32,6 +37,10 @@ permissions:
 jobs:
   build-push:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
     strategy:
       matrix:
         image: ${{ fromJson(inputs.images) }}
@@ -50,7 +59,12 @@ jobs:
 
       - name: Build image
         run: |
-          IMAGE_PATH="${{ inputs.region }}-docker.pkg.dev/${{ inputs.project }}/${{ github.event.repository.name }}/${{ matrix.image.name }}"
+          REPOSITORY="${{ inputs.artifact-repository }}"
+          if [ -z "$REPOSITORY" ]; then
+            REPOSITORY="${{ github.event.repository.name }}"
+          fi
+
+          IMAGE_PATH="${{ inputs.region }}-docker.pkg.dev/${{ inputs.project }}/$REPOSITORY/${{ matrix.image.name }}"
           echo "IMAGE_PATH=$IMAGE_PATH" >> $GITHUB_ENV
 
           CONTEXT="${{ matrix.image.context || '.' }}"
