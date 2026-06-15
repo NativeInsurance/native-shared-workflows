@@ -127,5 +127,8 @@ jobs:
           IMAGE_REF: ${{ steps.image-path.outputs.image }}
         run: bash "${{ inputs.verify-script }}"
 
+      - name: Refresh Docker auth
+        run: gcloud auth configure-docker ${{ inputs.region }}-docker.pkg.dev --quiet
+
       - name: Push to Artifact Registry
         run: docker push "$IMAGE_PATH" --all-tags
